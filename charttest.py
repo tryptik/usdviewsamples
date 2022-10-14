@@ -53,6 +53,55 @@ def skel_to_treeitems(joints):
 SERIES_ROLE = QtCore.Qt.UserRole + 1024
 SERIES_IDX_ROLE = QtCore.Qt.UserRole + 1025
 
+class JointSamples(QtCore.QObject):
+    def __init__(self, joint_path, parent=None):
+        super().__init__(parent)
+        self.setObjectName(Sdf.Path(joint_path).name)
+        self._series = []
+        for att in ('.tx', '.ty', '.tz', '.rx', '.ry', '.rz', '.sx', '.sy', '.sz'):
+            series = QtCharts.QLineSeries()
+            series.setName(self.objectName()+att)
+            series.setPointsVisible(True)
+            # series.setPointSize(4)
+            if 'x' in att:
+                series.setColor(QtGui.QColor('red'))
+            elif 'y' in att:
+                series.setColor(QtGui.QColor('green'))
+            else:
+                series.setColor(QtGui.QColor('blue'))
+            self._series.append(series)
+
+    def append(self, sample, trans, rot, scale):
+        children = self._series
+        children[0].append(sample, trans[0])
+        children[1].append(sample, trans[1])
+        children[2].append(sample, trans[2])
+        rot = Gf.Rotation(rot)
+        eul = rot.Decompose(Gf.Vec3d.XAxis(), Gf.Vec3d.YAxis(), Gf.Vec3d.ZAxis())
+        children[3].append(sample, eul[0])
+        children[4].append(sample, eul[1])
+        children[5].append(sample, eul[2])
+        children[6].append(sample, scale[0])
+        children[7].append(sample, scale[1])
+        children[8].append(sample, scale[2])
+
+    def add_to_chart(self, chart):
+        for ch in self._series:
+            chart.addSeries(ch)
+
+    def rm_from_chart(self, chart):
+        for ch in self._series:
+            chart.removeSeries(ch)
+
+    # def set_point_size(self, sz):
+    #     for ch in self.children():
+    #         ch.setPointSize(sz)
+
+    def set_points_visible(self, val):
+        for ch in self.children():
+            ch.setPointsVisible(val)
+
+
 class GraphWidget(QtWidgets.QWidget):
     _instance = None
 
@@ -80,33 +129,19 @@ class GraphWidget(QtWidgets.QWidget):
         self.setLayout(ly)
         self.pathList.itemSelectionChanged.connect(self.on_selection_changed)
 
-    def _on_selection_changed(self):
-        for sel in self._last_sel:
-            for series in sel.data(0, SERIES_ROLE) or []:
-                self.chart.removeSeries(series)
-                # series.setVisible(False)
-        self._last_sel = self.pathList.selectedItems()
-        for sel in self._last_sel:
-            for series in sel.data(0, SERIES_ROLE) or []:
-                logger.info(' + %s (%s)', series, series.count())
-                self.chart.addSeries(series)
-                # series.setVisible(True)
-        self.chart.createDefaultAxes()
-
     def on_selection_changed(self):
         for sel in self._last_sel:
-            for series in self._series_map.get(sel.data(0, SERIES_IDX_ROLE),  []):
-                self.chart.removeSeries(series)
-                # series.setVisible(False)
+            smp = self._series_map.get(sel.data(0, SERIES_IDX_ROLE))
+            if smp:
+                smp.rm_from_chart(self.chart)
         self._last_sel = self.pathList.selectedItems()
         for sel in self._last_sel:
-            for series in self._series_map.get(sel.data(0, SERIES_IDX_ROLE),  []):
-                # logger.info(' + %s', series.name())
-                self.chart.addSeries(series)
-                # series.setVisible(True)
+            smp = self._series_map.get(sel.data(0, SERIES_IDX_ROLE))
+            if smp:
+                smp.add_to_chart(self.chart)
         self.chart.createDefaultAxes()
 
-    def add_skel_and_anim(self, skel_prim, src):
+    def _add_skel_and_anim(self, skel_prim, src):
         # logger.info('    Skeleton: %s', skel_prim)
         skel = UsdSkel.Skeleton(skel_prim)
         skel_joints = skel.GetJointsAttr().Get()
@@ -156,6 +191,40 @@ class GraphWidget(QtWidgets.QWidget):
 
         # for x in tseries:
         #     self.chart.addSeries(x)
+
+    def add_skel_and_anim(self, skel_prim, src):
+        # logger.info('    Skeleton: %s', skel_prim)
+        skel = UsdSkel.Skeleton(skel_prim)
+        skel_joints = skel.GetJointsAttr().Get()
+
+        root, joint_item_dct = skel_to_treeitems(skel_joints)
+        prim_item = QtWidgets.QTreeWidgetItem([skel_prim.GetName()])
+        prim_item.addChild(root)
+        self.pathList.addTopLevelItem(prim_item)
+
+        anim = UsdSkel.Animation(src)
+        anim_joints = anim.GetJointsAttr().Get()
+
+        tr = anim.GetTranslationsAttr()
+        rt = anim.GetRotationsAttr()
+        sc = anim.GetScalesAttr()
+
+        assert tr.GetNumTimeSamples() == rt.GetNumTimeSamples() == sc.GetNumTimeSamples()
+        samples = tr.GetTimeSamples()
+        for s in samples:
+            local_tr = tr.Get(s)
+            local_rt = rt.Get(s)
+            local_sc = sc.Get(s)
+            first_sample = True
+            for i,joint in enumerate(anim_joints):
+                smp = self._series_map.get(i) or self._series_map.setdefault(i, JointSamples(joint))
+                smp.append(s, local_tr[i], local_rt[i], local_sc[i])
+
+                if first_sample:
+                    titem = joint_item_dct.get(joint)
+                    if titem:
+                        titem.setData(0, SERIES_IDX_ROLE, i)
+            first_sample = False
 
     def add_skel_animation(self, stage):
         """Find and apply skel anim"""

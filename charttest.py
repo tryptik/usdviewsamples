@@ -52,6 +52,9 @@ class GraphWidget(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._prim_map = {}
+        self._last_sel = list()
+
         ly = QtWidgets.QVBoxLayout()
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -67,10 +70,20 @@ class GraphWidget(QtWidgets.QWidget):
         splitter.addWidget(self.chartView)
         ly.addWidget(splitter)
         self.setLayout(ly)
+        self.pathList.itemSelectionChanged.connect(self.on_selection_changed)
 
+    def on_selection_changed(self):
+        for sel in self._last_sel:
+            for series in sel.data(0, SERIES_ROLE) or []:
+                series.setVisible(False)
+        self._last_sel = self.pathList.selectedItems()
+        for sel in self._last_sel:
+            for series in sel.data(0, SERIES_ROLE) or []:
+                logger.info('   + %s', series.name())
+                series.setVisible(True)
 
     def add_skel_and_anim(self, skel_prim, src):
-        logger.info('    Skeleton: %s', skel_prim)
+        # logger.info('    Skeleton: %s', skel_prim)
         skel = UsdSkel.Skeleton(skel_prim)
         skel_joints = skel.GetJointsAttr().Get()
 
@@ -81,7 +94,7 @@ class GraphWidget(QtWidgets.QWidget):
 
         anim = UsdSkel.Animation(src)
         anim_joints = anim.GetJointsAttr().Get()
-        logger.info('  Anim jnts: %s', anim_joints)
+        # logger.info('  Anim jnts: %s', anim_joints)
 
         joint_dict = {x:i for i,x in enumerate(skel_joints)}
 
@@ -97,13 +110,14 @@ class GraphWidget(QtWidgets.QWidget):
                 sr = QtCharts.QLineSeries()
                 sr.setName(joint.split('/')[-1]+chan)
                 sr.setPointsVisible(True)
-                series_index.append(len(tseries))
+                series_index.append(sr)
                 tseries.append(sr)
+                sr.setVisible(False)
 
             titem = joint_item_dct.get(joint)
             if titem:
                 titem.setData(0, SERIES_ROLE, series_index)
-                titem.setCheckState(0, QtCore.Qt.Checked)
+                # titem.setCheckState(0, QtCore.Qt.Checked)
 
         for s in samples:
             values = anim.GetTranslationsAttr().Get(s)
@@ -149,9 +163,31 @@ class GraphWidget(QtWidgets.QWidget):
         self.chart.createDefaultAxes()
         self.chartView.setChart(self.chart)
 
+    # def get_series_from_prim(self, prim):
+    #     return list()
+    #
+    # def set_prim(self, prim):
+    #     path = prim.GetPath()
+    #     series = self._prim_map.get(path)
+    #     if series is None:
+    #         series = self.get_series_from_prim(prim)
+    #         self._prim_map[path] = series
+    #
+    #     for s in series:
+    #         self.chart.addSeries(s)
+
+    def unset_prim(self, prim):
+        for series in self._prim_map.get(prim.GetPath(), list()):
+            self.chart.removeSeries(series)
+
+
     @classmethod
     def initUi(cls):
         cls._instance = cls()
         cls._instance.show()
         cls._instance.raise_()
         return cls._instance
+
+if __name__ == 'builtins':
+    t = GraphWidget.initUi()
+    t.set_stage(usdviewApi.stage)

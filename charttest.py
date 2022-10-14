@@ -2,7 +2,7 @@
 C:/Users/trypt/PycharmProjects/charttest/charttest.py
 
 """
-
+import weakref
 import logging
 
 from PySide2 import QtGui, QtWidgets, QtCore
@@ -53,14 +53,15 @@ def skel_to_treeitems(joints):
 SERIES_ROLE = QtCore.Qt.UserRole + 1024
 SERIES_IDX_ROLE = QtCore.Qt.UserRole + 1025
 
-class JointSamples(QtCore.QObject):
-    def __init__(self, joint_path, parent=None):
-        super().__init__(parent)
-        self.setObjectName(Sdf.Path(joint_path).name)
+
+class JointSamples:
+    def __init__(self, joint_path, parent):
+        self.parent = weakref.proxy(parent)
+        self.name = Sdf.Path(joint_path).name
         self._series = []
         for att in ('.tx', '.ty', '.tz', '.rx', '.ry', '.rz', '.sx', '.sy', '.sz'):
             series = QtCharts.QLineSeries()
-            series.setName(self.objectName()+att)
+            series.setName(self.name+att)
             series.setPointsVisible(True)
             # series.setPointSize(4)
             if 'x' in att:
@@ -86,19 +87,22 @@ class JointSamples(QtCore.QObject):
         children[8].append(sample, scale[2])
 
     def add_to_chart(self, chart):
-        for ch in self._series:
-            chart.addSeries(ch)
+        if self.parent.view_translate():
+            for ch in self._series[0:3]:
+                chart.addSeries(ch)
+        if self.parent.view_rotate():
+            for ch in self._series[3:6]:
+                chart.addSeries(ch)
+        if self.parent.view_scale():
+            for ch in self._series[6:9]:
+                chart.addSeries(ch)
 
     def rm_from_chart(self, chart):
         for ch in self._series:
             chart.removeSeries(ch)
 
-    # def set_point_size(self, sz):
-    #     for ch in self.children():
-    #         ch.setPointSize(sz)
-
     def set_points_visible(self, val):
-        for ch in self.children():
+        for ch in self._series:
             ch.setPointsVisible(val)
 
 
@@ -112,6 +116,22 @@ class GraphWidget(QtWidgets.QWidget):
         self._series_map = {}
 
         ly = QtWidgets.QVBoxLayout()
+
+        hly = QtWidgets.QHBoxLayout()
+        self._tr_only = QtWidgets.QCheckBox('Translate')
+        self._tr_only.setChecked(True)
+        self._tr_only.stateChanged.connect(self.on_view_cb_stateChanged)
+        self._rotate_only = QtWidgets.QCheckBox('Rotate')
+        self._rotate_only.setChecked(True)
+        self._rotate_only.stateChanged.connect(self.on_view_cb_stateChanged)
+        self._sc_only = QtWidgets.QCheckBox('Scale')
+        self._sc_only.setChecked(True)
+        self._sc_only.stateChanged.connect(self.on_view_cb_stateChanged)
+
+        hly.addWidget(self._tr_only)
+        hly.addWidget(self._rotate_only)
+        hly.addWidget(self._sc_only)
+        ly.addLayout(hly)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         self.pathList = QtWidgets.QTreeWidget()
@@ -128,6 +148,19 @@ class GraphWidget(QtWidgets.QWidget):
         ly.addWidget(splitter)
         self.setLayout(ly)
         self.pathList.itemSelectionChanged.connect(self.on_selection_changed)
+        self.setWindowTitle('Samples Viewer')
+
+    def view_translate(self):
+        return self._tr_only.isChecked()
+
+    def view_rotate(self):
+        return self._rotate_only.isChecked()
+
+    def view_scale(self):
+        return self._sc_only.isChecked()
+
+    def on_view_cb_stateChanged(self, _):
+        self.on_selection_changed()
 
     def on_selection_changed(self):
         for sel in self._last_sel:
@@ -140,57 +173,6 @@ class GraphWidget(QtWidgets.QWidget):
             if smp:
                 smp.add_to_chart(self.chart)
         self.chart.createDefaultAxes()
-
-    def _add_skel_and_anim(self, skel_prim, src):
-        # logger.info('    Skeleton: %s', skel_prim)
-        skel = UsdSkel.Skeleton(skel_prim)
-        skel_joints = skel.GetJointsAttr().Get()
-
-        root, joint_item_dct = skel_to_treeitems(skel_joints)
-        prim_item = QtWidgets.QTreeWidgetItem([skel_prim.GetName()])
-        prim_item.addChild(root)
-        self.pathList.addTopLevelItem(prim_item)
-
-        anim = UsdSkel.Animation(src)
-        anim_joints = anim.GetJointsAttr().Get()
-        # logger.info('  Anim jnts: %s', anim_joints)
-
-        joint_dict = {x:i for i,x in enumerate(skel_joints)}
-
-        tr = anim.GetTranslationsAttr()
-        rt = anim.GetRotationsAttr()
-        sc = anim.GetScalesAttr()
-
-        samples = tr.GetTimeSamples()
-        tseries = []
-        for joint in anim_joints:
-            series_index = []
-            for chan in ('.tx', '.ty', '.tz',):
-                sr = QtCharts.QLineSeries()
-                sr.setName(joint.split('/')[-1]+chan)
-                sr.setPointsVisible(True)
-                series_index.append(sr)
-                tseries.append(sr)
-                # sr.setVisible(False)
-
-            titem = joint_item_dct.get(joint)
-            if titem:
-                src = len(self._series_map)
-                self._series_map[src] = series_index
-                titem.setData(0, SERIES_IDX_ROLE, src)
-                # titem.setCheckState(0, QtCore.Qt.Checked)
-
-        for s in samples:
-            values = anim.GetTranslationsAttr().Get(s)
-            assert len(values) * 3 == len(tseries)
-            for i,val in enumerate(values):
-                tidx = i * 3
-                tseries[tidx].append(s, val[0])
-                tseries[tidx+1].append(s, val[1])
-                tseries[tidx+2].append(s, val[2])
-
-        # for x in tseries:
-        #     self.chart.addSeries(x)
 
     def add_skel_and_anim(self, skel_prim, src):
         # logger.info('    Skeleton: %s', skel_prim)
@@ -217,7 +199,7 @@ class GraphWidget(QtWidgets.QWidget):
             local_sc = sc.Get(s)
             first_sample = True
             for i,joint in enumerate(anim_joints):
-                smp = self._series_map.get(i) or self._series_map.setdefault(i, JointSamples(joint))
+                smp = self._series_map.get(i) or self._series_map.setdefault(i, JointSamples(joint, self))
                 smp.append(s, local_tr[i], local_rt[i], local_sc[i])
 
                 if first_sample:

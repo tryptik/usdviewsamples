@@ -1,3 +1,8 @@
+"""
+C:/Users/trypt/PycharmProjects/charttest/charttest.py
+
+"""
+
 import logging
 
 from PySide2 import QtGui, QtWidgets, QtCore
@@ -9,7 +14,6 @@ logging.basicConfig()
 logger = logging.getLogger('usdchart')
 logger.setLevel(logging.DEBUG)
 
-SERIES_ROLE = QtCore.Qt.UserRole + 1024
 
 def prim_iter(prim, inclusive=False):
     if inclusive:
@@ -46,6 +50,8 @@ def skel_to_treeitems(joints):
             parent_item.addChild(item)
     return root,result
 
+SERIES_ROLE = QtCore.Qt.UserRole + 1024
+SERIES_IDX_ROLE = QtCore.Qt.UserRole + 1025
 
 class GraphWidget(QtWidgets.QWidget):
     _instance = None
@@ -54,12 +60,14 @@ class GraphWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._prim_map = {}
         self._last_sel = list()
+        self._series_map = {}
 
         ly = QtWidgets.QVBoxLayout()
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         self.pathList = QtWidgets.QTreeWidget()
         self.pathList.setAlternatingRowColors(True)
+        self.pathList.setSelectionMode(self.pathList.ExtendedSelection)
 
         self.chartView = QtCharts.QChartView()
         self.chart = QtCharts.QChart()
@@ -72,15 +80,31 @@ class GraphWidget(QtWidgets.QWidget):
         self.setLayout(ly)
         self.pathList.itemSelectionChanged.connect(self.on_selection_changed)
 
-    def on_selection_changed(self):
+    def _on_selection_changed(self):
         for sel in self._last_sel:
             for series in sel.data(0, SERIES_ROLE) or []:
-                series.setVisible(False)
+                self.chart.removeSeries(series)
+                # series.setVisible(False)
         self._last_sel = self.pathList.selectedItems()
         for sel in self._last_sel:
             for series in sel.data(0, SERIES_ROLE) or []:
-                logger.info('   + %s', series.name())
-                series.setVisible(True)
+                logger.info(' + %s (%s)', series, series.count())
+                self.chart.addSeries(series)
+                # series.setVisible(True)
+        self.chart.createDefaultAxes()
+
+    def on_selection_changed(self):
+        for sel in self._last_sel:
+            for series in self._series_map.get(sel.data(0, SERIES_IDX_ROLE),  []):
+                self.chart.removeSeries(series)
+                # series.setVisible(False)
+        self._last_sel = self.pathList.selectedItems()
+        for sel in self._last_sel:
+            for series in self._series_map.get(sel.data(0, SERIES_IDX_ROLE),  []):
+                # logger.info(' + %s', series.name())
+                self.chart.addSeries(series)
+                # series.setVisible(True)
+        self.chart.createDefaultAxes()
 
     def add_skel_and_anim(self, skel_prim, src):
         # logger.info('    Skeleton: %s', skel_prim)
@@ -112,11 +136,13 @@ class GraphWidget(QtWidgets.QWidget):
                 sr.setPointsVisible(True)
                 series_index.append(sr)
                 tseries.append(sr)
-                sr.setVisible(False)
+                # sr.setVisible(False)
 
             titem = joint_item_dct.get(joint)
             if titem:
-                titem.setData(0, SERIES_ROLE, series_index)
+                src = len(self._series_map)
+                self._series_map[src] = series_index
+                titem.setData(0, SERIES_IDX_ROLE, src)
                 # titem.setCheckState(0, QtCore.Qt.Checked)
 
         for s in samples:
@@ -128,8 +154,8 @@ class GraphWidget(QtWidgets.QWidget):
                 tseries[tidx+1].append(s, val[1])
                 tseries[tidx+2].append(s, val[2])
 
-        for x in tseries:
-            self.chart.addSeries(x)
+        # for x in tseries:
+        #     self.chart.addSeries(x)
 
     def add_skel_animation(self, stage):
         """Find and apply skel anim"""

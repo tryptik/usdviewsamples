@@ -6,6 +6,7 @@ from pxr import Usd
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     test = 'resources/UsdSkelExamples/HumanFemale/HumanFemale.keepAlive.usd'
+    test = 'resources/UsdSkelExamples/HumanFemale/HumanFemale.walk.usd'
     stage = Usd.Stage.Open(test)
 
     app = QtWidgets.QApplication([])

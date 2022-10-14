@@ -86,6 +86,23 @@ class JointSamples:
         children[7].append(sample, scale[1])
         children[8].append(sample, scale[2])
 
+    def add_translate(self, sample, trans):
+        self._series[0].append(sample, trans[0])
+        self._series[1].append(sample, trans[1])
+        self._series[2].append(sample, trans[2])
+
+    def add_rotate(self, sample, rot):
+        rot = Gf.Rotation(rot)
+        eul = rot.Decompose(Gf.Vec3d.XAxis(), Gf.Vec3d.YAxis(), Gf.Vec3d.ZAxis())
+        self._series[3].append(sample, eul[0])
+        self._series[4].append(sample, eul[1])
+        self._series[5].append(sample, eul[2])
+
+    def add_scale(self, sample, scale):
+        self._series[6].append(sample, scale[0])
+        self._series[7].append(sample, scale[1])
+        self._series[8].append(sample, scale[2])
+
     def add_to_chart(self, chart):
         if self.parent.view_translate():
             for ch in self._series[0:3]:
@@ -191,22 +208,25 @@ class GraphWidget(QtWidgets.QWidget):
         rt = anim.GetRotationsAttr()
         sc = anim.GetScalesAttr()
 
-        assert tr.GetNumTimeSamples() == rt.GetNumTimeSamples() == sc.GetNumTimeSamples()
-        samples = tr.GetTimeSamples()
-        for s in samples:
-            local_tr = tr.Get(s)
-            local_rt = rt.Get(s)
-            local_sc = sc.Get(s)
-            first_sample = True
-            for i,joint in enumerate(anim_joints):
-                smp = self._series_map.get(i) or self._series_map.setdefault(i, JointSamples(joint, self))
-                smp.append(s, local_tr[i], local_rt[i], local_sc[i])
+        logger.info('  %s', tr.GetNumTimeSamples())
+        logger.info('  %s', rt.GetNumTimeSamples())
+        logger.info('  %s', sc.GetNumTimeSamples())
 
-                if first_sample:
-                    titem = joint_item_dct.get(joint)
-                    if titem:
-                        titem.setData(0, SERIES_IDX_ROLE, i)
-            first_sample = False
+        # assert tr.GetNumTimeSamples() == rt.GetNumTimeSamples() == sc.GetNumTimeSamples()
+
+        for attr,fnc in [(tr, JointSamples.add_translate,), (rt, JointSamples.add_rotate,), (sc, JointSamples.add_scale,)]:
+            samples = attr.GetTimeSamples()
+            for s in samples:
+                local = attr.Get(s)
+                first_sample = True
+                for i,joint in enumerate(anim_joints):
+                    smp = self._series_map.get(i) or self._series_map.setdefault(i, JointSamples(joint, self))
+                    fnc(smp, s, local[i])
+                    if first_sample:
+                        titem = joint_item_dct.get(joint)
+                        if titem:
+                            titem.setData(0, SERIES_IDX_ROLE, i)
+                first_sample = False
 
     def add_skel_animation(self, stage):
         """Find and apply skel anim"""
